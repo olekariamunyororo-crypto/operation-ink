@@ -1,1 +1,1 @@
-import * as THREE from 'three'
+RECOVERY_MARKER_USE_ARTIFACT
