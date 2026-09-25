@@ -1,1 +1,1 @@
-PLACEHOLDER
+import * as THREE from 'three'
