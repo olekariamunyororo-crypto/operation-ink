@@ -198,8 +198,9 @@ export class TouchControls {
     const contact: Contact = { element, role, x: event.clientX, y: event.clientY,
       radius: (looking ? this.lookPad.getBoundingClientRect().width : rect.width) * 0.37 }
     if (role === 'move') { contact.x = rect.left + rect.width / 2; contact.y = rect.top + rect.height / 2 }
-    // Anchor look/fire relative to pad center so drag direction stays stable.
-    if (looking) {
+    // Look-pad / fire use the pad center as a virtual stick. The free-look surface
+    // (right half of the screen) keeps the finger-down origin so drag-to-turn works.
+    if (role === 'fire' || element === this.lookPad) {
       const pad = this.lookPad.getBoundingClientRect()
       contact.x = pad.left + pad.width / 2
       contact.y = pad.top + pad.height / 2
