@@ -30,6 +30,7 @@ export class MissionHUD {
   private caption: HTMLElement
   private menu: MissionMenu
   private mapDot: SVGElement
+  private minimapPlayer: SVGElement
   private icon: HTMLElement
   private captionTimer = 0
   private start: HTMLButtonElement
@@ -102,6 +103,12 @@ export class MissionHUD {
     this.threatLabel = this.threat.querySelector('span')!
     this.root.append(this.threat)
     this.clearThreat()
+    const minimap = document.createElement('div')
+    minimap.className = 'mission-minimap'
+    minimap.setAttribute('aria-hidden', 'true')
+    minimap.innerHTML = this.buildMinimap(world)
+    this.root.append(minimap)
+    this.minimapPlayer = minimap.querySelector('#minimap-player')!
     this.health = $('#mission-health')
     this.healthFill = this.health.querySelector('.health-fill')!
     this.scope.className = 'mission-scope'
@@ -144,6 +151,25 @@ export class MissionHUD {
       <text x="${x(-43)}" y="${z(-59)}">Mess hall</text><text x="${x(-92)}" y="${z(-50)}">Service gate</text><text x="${x(7)}" y="${z(5)}">Warehouse</text><text x="${x(64)}" y="${z(3)}">Workshop</text><text x="${x(132)}" y="${z(15)}">Barracks</text><text x="${x(108)}" y="${z(-18)}">Detention</text>
       ${world.stations.filter(s => ['cameras', 'gate', 'jeep'].includes(s.kind)).map(s => `<circle cx="${x(s.point.x)}" cy="${z(s.point.z)}" r="2.6" fill="var(--ink)"/><text text-anchor="${s.kind === 'gate' ? 'end' : 'start'}" x="${x(s.point.x)+(s.kind === 'gate' ? -5 : 5)}" y="${z(s.point.z)-5}">${s.id === SIGNALS_COMPUTER_ID ? 'Office terminal' : stationNames[s.kind]}</text>`).join('')}
       <path id="field-player" d="M0 -5 3.5 4 0 2 -3.5 4Z" fill="var(--ink-deep)" stroke="var(--paper)" stroke-width="1"/>
+    </svg>`
+  }
+
+  private buildMinimap(world: MissionWorld) {
+    const x = (v: number) => (v + 110) * 1.55 + 12, z = (v: number) => (v + 78) * 1.55 + 12
+    const buildings: [number, number, number, number][] = [[-34,-46,28,21],[25,-7,56,13],[16,36,20,14],[55,35,12,18],[-30,30,28,8],[83,-9,17,13],[117,-17,18,24],[146,-45,10,9],[143,3,14,10],[111,-45,12,10]]
+    const buildingsInk = buildings.map(([bx,bz,w,d]) => {
+      const left = x(bx-w/2), top = z(bz-d/2)
+      return `<rect x="${left}" y="${top}" width="${w*1.55}" height="${d*1.55}" fill="var(--paper)" stroke="var(--ink-light)" stroke-width="1.2"/>`
+    }).join('')
+    const marks = world.stations.filter(s => ['gate', 'jeep', 'hostage', 'cameras'].includes(s.kind)).map(s => {
+      const fill = s.kind === 'hostage' ? 'var(--ink)' : 'var(--ink-light)'
+      return `<circle cx="${x(s.point.x)}" cy="${z(s.point.z)}" r="3.2" fill="${fill}" stroke="var(--paper)" stroke-width="1"/>`
+    }).join('')
+    return `<svg viewBox="0 0 460 260" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="4" width="452" height="252" fill="var(--paper)" stroke="var(--ink)" stroke-width="2"/>
+      ${buildingsInk}
+      ${marks}
+      <path id="minimap-player" d="M0 -6 4 5 0 2.5 -4 5Z" fill="var(--ink-deep)" stroke="var(--paper)" stroke-width="1.2"/>
     </svg>`
   }
 
@@ -240,8 +266,12 @@ export class MissionHUD {
     this.root.classList.toggle('hurt', this.damageTimer > 0 && !this.reducedMotion)
     const kind = document.querySelector<HTMLElement>('#action-prompt')!.dataset.kind ?? 'mission'
     if (this.icon.dataset.kind !== kind) { this.icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">${icons[kind] ?? icons.mission}</svg>`; this.icon.dataset.kind = kind }
+    const mapX = (data.position.x + 110) * 1.55 + 12
+    const mapZ = (data.position.z + 78) * 1.55 + 12
+    const mapRot = -data.yaw * 180 / Math.PI
+    this.minimapPlayer.setAttribute('transform', `translate(${mapX},${mapZ}) rotate(${mapRot})`)
     if (!data.playing) {
-      this.mapDot.setAttribute('transform', `translate(${(data.position.x+110)*1.55+12},${(data.position.z+78)*1.55+12}) rotate(${-data.yaw*180/Math.PI})`)
+      this.mapDot.setAttribute('transform', `translate(${mapX},${mapZ}) rotate(${mapRot})`)
     }
     this.menu.update(state, data)
   }
