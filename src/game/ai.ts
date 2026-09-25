@@ -353,6 +353,7 @@ export class EnemyDirector {
       enemy.timer += dt
       enemy.repath -= dt
       enemy.contactMemory = Math.max(0, enemy.contactMemory - dt)
+      enemy.suppress = Math.max(0, enemy.suppress - dt * COMBAT.suppressDecay)
       enemy.shotTimer = Math.max(0, enemy.shotTimer - dt)
       enemy.calloutTimer -= dt
       enemy.communicationTimer -= dt
@@ -577,8 +578,16 @@ export class EnemyDirector {
     const distance = enemy.position.distanceTo(known)
     const roll = this.random(enemy)
     const role = this.combatRole(enemy)
+    const player = this.lastPlayer
+    const playerPressured = !!(player?.reloading || (player?.suppressed ?? 0) > 0.35)
     enemy.tacticPoint = null
     if (role === 'sniper') { enemy.tactic = 'hold'; enemy.tacticTimer = 4; return }
+    if (enemy.suppress >= COMBAT.suppressCover && enemy.health >= 20) {
+      const cover = this.coverPoint(enemy, threatEye, true)
+      if (cover) { enemy.tactic = 'cover'; enemy.tacticPoint = cover; enemy.tacticTimer = 4; return }
+      enemy.tacticPoint = this.coverPoint(enemy, threatEye, false)
+      if (enemy.tacticPoint) { enemy.tactic = 'retreat'; enemy.tacticTimer = 4; return }
+    }
     if (enemy.reloadTimer > 0 || enemy.health < 35) {
       if (!this.context.world.visible(threatEye, enemy.position.clone().add(eyeOffset), ignore)) {
         enemy.tactic = 'hold'; enemy.tacticTimer = Math.max(1, enemy.reloadTimer + 0.3); return
@@ -596,9 +605,13 @@ export class EnemyDirector {
     if (enemy.canSee && this.protectedPost(enemy)) { enemy.tactic = 'hold'; enemy.tacticTimer = 4; return }
     const covering = squad.some(ally => ally.canSee && ally.tactic === 'hold' && ally.settledFor >= COMBAT.settle && ally.reloadTimer <= 0 && ally.magazine > 0 && ally.hitPause <= 0)
     const repositioning = squad.some(ally => ['flank', 'charge', 'cover', 'retreat', 'peek'].includes(ally.tactic))
-    const movers = squad.filter(ally => ally.tactic === 'flank' || ally.tactic === 'charge').length
-    const flankChance = role === 'flanker' ? 0.78 : role === 'rusher' ? 0.45 : 0.35
-    if (covering && !repositioning && movers === 0 && roll < flankChance && distance < 35 && !enemy.woundLeg) {
+    const flankers = squad.filter(ally => ally.tactic === 'flank').length
+    const chargers = squad.filter(ally => ally.tactic === 'charge').length
+    const movers = flankers + chargers
+    const moverCap = playerPressured ? COMBAT.maxMoversPressured : COMBAT.maxMovers
+    let flankChance = role === 'flanker' ? 0.78 : role === 'rusher' ? 0.45 : 0.35
+    if (playerPressured) flankChance = Math.min(0.92, flankChance + 0.2)
+    if (covering && !repositioning && movers < moverCap && flankers < 1 && roll < flankChance && distance < 35 && !enemy.woundLeg) {
       const point = this.firingPosition(enemy, known, false)
       if (point) {
         enemy.tactic = 'flank'; enemy.tacticPoint = point; enemy.tacticTimer = 7
@@ -609,12 +622,13 @@ export class EnemyDirector {
       enemy.tactic = 'hold'; enemy.tacticTimer = 2; return
     }
     const cover = this.coverPoint(enemy, threatEye, false)
-    const coverChance = role === 'anchor' ? 0.92 : role === 'flanker' ? 0.7 : 0.55
+    let coverChance = role === 'anchor' ? 0.92 : role === 'flanker' ? 0.7 : 0.55
+    if (enemy.suppress > 0.4) coverChance = Math.min(0.95, coverChance + 0.15)
     if (cover && roll < coverChance) { enemy.tactic = 'cover'; enemy.tacticPoint = cover; enemy.tacticTimer = 5; return }
     const effectiveRange = enemy.spec.weapon === 'shotgun' ? 12 : enemy.spec.weapon === 'smg' ? 18 : enemy.spec.weapon === 'pistol' ? 20 : 26
-    const advanceOk = role === 'rusher' || role === 'flanker'
+    const advanceOk = role === 'rusher' || (role === 'flanker' && playerPressured)
     const shouldAdvance = advanceOk && enemy.canSee && distance > effectiveRange && !enemy.woundLeg &&
-      (!squad.length || covering && !repositioning && movers === 0)
+      chargers < 1 && movers < moverCap && (!squad.length || covering && !repositioning)
     enemy.tacticPoint = shouldAdvance ? this.firingPosition(enemy, known, true) : null
     enemy.tactic = enemy.tacticPoint ? 'charge' : 'hold'
     enemy.tacticTimer = enemy.tacticPoint ? 7 : 3.5
@@ -966,6 +980,14 @@ export class EnemyDirector {
 
   hear(event: SoundEvent) {
     if (!event.position || !event.radius || event.kind.startsWith('enemy-') || ['callout', 'ambience', 'door'].includes(event.kind)) return
+    const shot = event.kind.includes('shot')
+    if (shot) {
+      for (const enemy of this.enemies) {
+        if (enemy.state !== 'combat' && enemy.state !== 'search') continue
+        const dist = enemy.position.distanceTo(event.position)
+        if (dist < 14) enemy.suppress = Math.min(2.8, enemy.suppress + COMBAT.suppressShot * (dist < 6 ? 1.2 : 0.7))
+      }
+    }
     for (const enemy of this.enemies) {
       if (['dead', 'reserve', 'combat'].includes(enemy.state)) continue
       const from = this.eye(enemy)
@@ -973,7 +995,6 @@ export class EnemyDirector {
       const distance = from.distanceTo(source)
       // A visible muzzle disturbance within plausible view range is noticeable even when a
       // weapon's ordinary sound radius is shorter. It supplies a location, never a confirmed target.
-      const shot = event.kind.includes('shot')
       const visibleShot = shot && insideVisionCone(from, enemy.yaw, event.position, enemy.spec.role === 'sniper' ? COMBAT.sniperEngagedRange : COMBAT.engagedRange) &&
         this.context.world.visible(from, event.position, ignore)
       // Seeing the muzzle can interrupt a near-miss scan; hearing it through cover cannot.

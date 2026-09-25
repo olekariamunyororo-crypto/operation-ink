@@ -64,6 +64,7 @@ export class MissionRuntime {
   private impactPoint: THREE.Vector3 | null = null
   private disposed = false
   private gunfireUntil = 0
+  private underFireUntil = 0
 
   constructor(scene: THREE.Scene, private camera: EnvironmentCamera,
     readonly player: FirstPersonController, readonly world: MissionWorld, private invalidate: () => void) {
@@ -301,6 +302,9 @@ export class MissionRuntime {
     if (this.death.active) return
     if ((event.kind.startsWith('shot-') || event.kind.startsWith('enemy-shot')) && event.position) {
       if (this.state.hostages.some(h => h.status === 'following' && event.position!.distanceTo(new THREE.Vector3(...h.position)) < 15)) this.gunfireUntil = this.state.elapsed + 1.1
+      if (event.kind.startsWith('enemy-shot') && event.position.distanceTo(this.player.body.position) < 14) {
+        this.underFireUntil = Math.max(this.underFireUntil, this.state.elapsed + 1.25)
+      }
     }
     const eye = this.camera.perspective.position
     const distance = event.position ? eye.distanceTo(event.position) : 0
@@ -377,7 +381,7 @@ export class MissionRuntime {
     this.playerHits.clear()
     this.player.pause(); this.cancelInput(); this.audio.reset(); this.player.actions.reset()
     this.state=structuredClone(saved.mission)
-    this.player.movementLocked = false; this.gunfireUntil = 0
+    this.player.movementLocked = false; this.gunfireUntil = 0; this.underFireUntil = 0
     this.player.actions.doors.forEach((door,i)=>setDoorOpen(door,saved.doors[i]??false,true))
     this.player.world.refresh(); this.ai.restore(structuredClone(saved.enemies)); this.weapons.restore(structuredClone(saved.weapons)); this.blood.restore(saved.blood)
     this.player.body.teleport(new THREE.Vector3(...saved.position)); this.player.actions.syncCamera(this.camera.perspective)
@@ -516,8 +520,10 @@ export class MissionRuntime {
       if (Math.abs(body.position.x - 117) < 10 && body.position.z > -31 && body.position.z < -2) this.state.detentionFound = true
       if (this.state.detentionFound && body.position.y < -2.8) this.state.cellsReached = true
       this.security.update(dt, this.state, this.camera.perspective.position)
+      const suppressed = Math.max(0, this.underFireUntil - this.state.elapsed) / 1.25
       this.ai.update(dt,{feet:body.position,eye:this.camera.perspective.position,velocity:body.velocity,alive:this.state.phase==='active',radioEnabled:true,
-        yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y})
+        yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y,
+        reloading: this.weapons.reloading, suppressed})
       const danger = this.gunfireUntil > this.state.elapsed
       this.escort.update(dt, this.state, body.position, danger)
       if (this.world.rescue) {
