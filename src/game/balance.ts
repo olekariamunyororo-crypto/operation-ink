@@ -70,6 +70,13 @@ export const ENEMY_COMBAT = {
   blockedReposition: 0.3,
   /** Abort flank/charge only inside this distance when still healthy. */
   flankAbortRange: 4,
+  /** Enemy suppress buildup from nearby player fire; decays per second. */
+  suppressShot: 0.7,
+  suppressDecay: 0.5,
+  suppressCover: 0.85,
+  /** Max simultaneous flank+charge movers; +1 when player is suppressed/reloading. */
+  maxMovers: 1,
+  maxMoversPressured: 2,
 } as const
 
 export const SHOTGUN_PELLETS = 8
