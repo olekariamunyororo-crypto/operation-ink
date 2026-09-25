@@ -61,11 +61,15 @@ export const ENEMY_COMBAT = {
   aimHalfAngle: 12 * Math.PI / 180,
   turnSpeed: 7.5,
   aimDelay: 0.8,
+  /** Shorter aim once already in a firefight (not first contact). */
+  aimDelayCombat: 0.4,
   reaction: [0.8, 1.0],
   sniperReaction: [0.9, 1.1],
   openingHold: 1.75,
   blockedRetry: 0.05,
   blockedReposition: 0.3,
+  /** Abort flank/charge only inside this distance when still healthy. */
+  flankAbortRange: 4,
 } as const
 
 export const SHOTGUN_PELLETS = 8
