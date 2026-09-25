@@ -217,7 +217,7 @@ export class TouchControls {
       this.stick.classList.toggle('touch-running', stick.sprint)
     } else if (contact.role === 'look' || contact.role === 'fire') {
       const stick = touchLookStick(x, y, contact.radius)
-      this.lookStrength = Math.min(1, Math.hypot(stick.x / 1200, stick.y / 900))
+      this.lookStrength = Math.min(1, Math.hypot(stick.x / 650, stick.y / 490))
       this.player.setTouchLook(stick.x, stick.y)
       this.lookCursor.style.transform = `translate(${stick.knobX}px, ${stick.knobY}px)`
     }
