@@ -24,6 +24,7 @@ export function touchLookStick(x: number, y: number, radius: number) {
   const reach = Math.min(1, distance / radius)
   const speed = Math.pow(Math.max(0, (reach - 0.1) / 0.9), 1.5)
   const scale = distance > 0 ? Math.min(distance, radius) / distance : 0
-  return { x: distance ? x / distance * speed * 1200 : 0, y: distance ? y / distance * speed * 900 : 0,
+  // Scales kept moderate for phones; user can raise "Look" in settings if needed.
+  return { x: distance ? x / distance * speed * 650 : 0, y: distance ? y / distance * speed * 490 : 0,
     knobX: x * scale, knobY: y * scale }
 }
