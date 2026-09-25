@@ -46,6 +46,7 @@ export class MissionRuntime {
   ready = false
   readonly initialized: Promise<void>
   deaths = 0
+  // Opt-in protection for staged checks; normal play always starts vulnerable.
   invincible = false
   private abort = new AbortController()
   private checkpoint: Checkpoint | null = null
@@ -132,6 +133,8 @@ export class MissionRuntime {
       wheel.preventDefault()
       this.invalidate()
     }, { ...options, passive: false })
+    // Toggle aim so firing never requires simultaneous mouse buttons (Magic
+    // Mouse / trackpads). Mouse events also report each button independently.
     window.addEventListener('mousedown', event => {
       if (player.touchMode) return
       if (!this.isActive() || event.target !== document.querySelector('#world')) return
@@ -224,7 +227,6 @@ export class MissionRuntime {
       slots: this.weapons.slots.map(slot => slot ? { name: slot.name, label: WEAPON_RULES[slot.name].label } : null),
       canReload: this.weapons.canReload && !this.player.actions.traversing })
   }
-
   private keyDown = (event: KeyboardEvent) => {
     if (this.escape.active) return
     const zoomKey = event.code === 'KeyQ' || event.code === 'KeyE'
@@ -281,9 +283,11 @@ export class MissionRuntime {
     if (!result.changed) return false
     this.weapons.cancel()
     this.emit({ kind: station.kind === 'distraction' ? 'bell' : 'objective',
-      position: station.point.clone(), radius: station.kind === 'distraction' ? 27 : 6 }, station.kind === 'distraction)
+      position: station.point.clone(), radius: station.kind === 'distraction' ? 27 : 6 }, station.kind === 'distraction')
     if (station.kind === 'rally') this.escort.rally(this.state)
-    if (station.kind === 'jeep') this.beginEscape()
+    if (station.kind === 'jeep') {
+      this.beginEscape()
+    }
     if (this.state.phase === 'complete') { this.player.pause(); this.cancelInput() }
     this.syncWorld(); this.invalidate()
     return true
@@ -343,6 +347,7 @@ export class MissionRuntime {
         amount, this.player.body.grounded && !this.player.actions.traversing)
     }
     this.hud.hurt(); this.audio.play({kind:'damage'})
+    // Share the local hurt recording, impact thump and shading for bullets and hard landings.
     this.audio.play({ kind: 'bullet-hit', intensity: Math.min(1, amount / 28) })
     this.hud.hitFrom(1, source ? this.soundDirection(source) : 'Below')
     this.hud.notify(source ? `Taking fire · ${this.soundDirection(source).toLowerCase()}. Break line of sight.` : 'You fell. Find a safer route.',2.5)
@@ -353,85 +358,166 @@ export class MissionRuntime {
       this.weapons.beginDeath()
       this.player.pause(); this.player.actions.reset(); this.cancelInput()
       this.player.body.velocity.set(0, 0, 0)
+      this.audio.beginDeath()
+      this.hud.setScoped(false); this.hud.clearThreat(); this.hud.setDeath(this.death)
     }
-  }
-
-  private beginEscape() {
-    this.player.pause(); this.cancelInput()
-    this.escape.begin(this.camera.perspective, this.player.body.position, this.world)
-    this.hud.setEscape(this.escape)
-  }
-
-  private restart() {
-    if (!this.checkpoint) return
-    this.death.reset(); this.weapons.resetDeath()
-    this.state = structuredClone(this.checkpoint.mission)
-    this.weapons.restore(structuredClone(this.checkpoint.weapons))
-    this.ai.restore(structuredClone(this.checkpoint.enemies))
-    if (this.checkpoint.blood) this.blood.restore(this.checkpoint.blood)
-    this.player.body.teleport(new THREE.Vector3(...this.checkpoint.position))
-    this.camera.perspective.quaternion.fromArray(this.checkpoint.quaternion)
-    this.player.world.refresh(); this.syncWorld(); this.cancelInput()
-    this.player.movementLocked = false; this.gunfireUntil = 0
-    this.safePosition.copy(this.player.body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
     this.invalidate()
   }
 
   private snapshot(): Checkpoint {
-    return {
-      mission: structuredClone(this.state),
-      weapons: this.weapons.snapshot(),
-      enemies: this.ai.snapshot(),
-      doors: this.player.actions.doors.map(d => d.open),
-      position: this.player.body.position.toArray() as Vec3,
-      quaternion: this.camera.perspective.quaternion.toArray() as [number,number,number,number],
-      blood: this.blood.snapshot(),
+    return { mission:structuredClone(this.state),weapons:this.weapons.snapshot(),enemies:this.ai.snapshot(),
+      doors:this.player.actions.doors.map(door=>Boolean(door.userData.open)),position:this.player.body.position.toArray() as Vec3,
+      quaternion:this.camera.perspective.quaternion.toArray() as [number,number,number,number], blood:this.blood.snapshot() }
+  }
+
+  private restore(saved: Checkpoint) {
+    this.escape.reset(this.camera.perspective)
+    this.escapeDust.clear()
+    this.death.reset(); this.weapons.resetDeath()
+    this.playerHits.clear()
+    this.player.pause(); this.cancelInput(); this.audio.reset(); this.player.actions.reset()
+    this.state=structuredClone(saved.mission)
+    this.player.movementLocked = false; this.gunfireUntil = 0
+    this.player.actions.doors.forEach((door,i)=>setDoorOpen(door,saved.doors[i]??false,true))
+    this.player.world.refresh(); this.ai.restore(structuredClone(saved.enemies)); this.weapons.restore(structuredClone(saved.weapons)); this.blood.restore(saved.blood)
+    this.player.body.teleport(new THREE.Vector3(...saved.position)); this.player.actions.syncCamera(this.camera.perspective)
+    this.camera.perspective.quaternion.fromArray(saved.quaternion)
+    this.safePosition.copy(this.player.body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
+    this.stepTime=0; this.interactionTime=0; this.hitFlash=0; this.lastCaptionAt=-100
+    this.bulletTrails.clear(); this.impacts.clear(); this.hud.reset(); this.security.reset(); this.syncWorld(true); this.invalidate()
+  }
+
+  retry() { if(this.checkpoint) { this.restore(this.checkpoint); this.hud.notify('Mission reset.',3) } }
+  restart() {
+    if(!this.initial) return
+    this.checkpoint=structuredClone(this.initial); this.deaths=0; this.restore(this.initial)
+    this.hud.notify('Mission restarted.',3)
+  }
+
+  private syncWorld(resetEscort = false) {
+    const rescue = this.world.rescue
+    if (rescue) {
+      setDoorOpen(rescue.gate, this.state.gateOpen)
+      rescue.cellDoors.forEach((door, index) => {
+        const released = this.state.hostages[index].status !== 'captive'
+        door.userData.missionLocked = !released
+        setDoorOpen(door, released)
+      })
+      rescue.jeep.position.set(...RESCUE_LAYOUT.escapeRoute[0])
+      if (resetEscort) {
+        rescue.jeep.quaternion.identity()
+        for (const wheel of rescue.jeep.userData.wheels as THREE.Group[] ?? []) wheel.rotation.set(0, 0, 0)
+        const door = rescue.jeep.userData.passengerDoor as THREE.Group
+        door.rotation.y = 0
+      }
+      this.player.world.refresh()
     }
+    if (resetEscort) this.escort.sync(this.state)
+    this.security.sync(this.state)
+    if (this.state.alarm !== 'active') this.audio.setAlarm(false)
   }
 
-  private syncWorld() {
-    // mission world side effects (gate, etc.) handled elsewhere in full source
+  private beginEscape() {
+    this.cancelInput(); this.playerHits.clear()
+    this.player.actions.reset(); this.player.movementLocked = true
+    this.player.body.velocity.set(0, 0, 0)
+    this.weapons.update(0, { active: false, climbing: false, moving: 0, aiming: false,
+      reducedMotion: this.hud.reducedMotion, feet: this.player.body.position })
+    this.hud.setScoped(false); this.hud.clearThreat()
+    this.bulletTrails.clear(); this.ai.bulletTrails.clear()
+    this.escape.begin(this.camera.perspective)
+    this.escapeDust.clear()
+    this.player.pause()
+    this.hud.setEscape(this.escape)
+    this.audio.setAlarm(false)
   }
 
-  update(dt: number, elapsed = dt) {
+  private updateEscape(dt: number, elapsed: number) {
+    const visible = this.player.enabled && !this.player.immersive
+    const playing = visible && !document.hidden && this.escape.running
+    const step = playing ? dt : 0
+    const cinematicStep = playing ? elapsed : 0
+    if (!visible) { this.hud.clearEscape(); this.audio.setActive(false); return false }
+    this.escape.update(cinematicStep)
+    const position = this.escape.position
+    this.state.escapeProgress = this.escape.progress
+    this.escort.jeepOffset.copy(position).sub(new THREE.Vector3(...RESCUE_LAYOUT.escapeRoute[0]))
+    this.escort.jeepRotation.copy(this.escape.rotation)
+    this.world.rescue?.jeep.position.copy(position)
+    const jeep = this.world.rescue?.jeep
+    if (jeep) {
+      jeep.quaternion.copy(this.escape.rotation)
+      for (const wheel of jeep.userData.wheels as THREE.Group[] ?? []) {
+        wheel.rotation.y = wheel.position.x > 0 ? this.escape.steering : 0
+        wheel.rotation.z = -this.state.escapeProgress / jeep.userData.wheelRadius
+      }
+    }
+    this.escapeDust.update(cinematicStep, position, this.escape.rotation, this.escape.speed)
+    // Keep the player aboard for world state, while the camera stays outside.
+    this.player.body.teleport(new THREE.Vector3(-0.35, -0.12, -0.46).applyQuaternion(this.escape.rotation).add(position))
+    if (playing) {
+      advanceMission(this.state, step)
+      this.player.world.refresh()
+      this.ai.update(step, { feet: this.player.body.position, eye: this.camera.perspective.position,
+        velocity: this.player.body.velocity, alive: false, radioEnabled: false })
+      this.escort.update(step, this.state, this.player.body.position, false)
+      if (jeep) updateRescueJeepDoor(jeep, this.state.hostages[0].position, true, step)
+      this.blood.update(step); this.impacts.update(step); this.bulletTrails.update(step)
+      this.security.sync(this.state, this.state.elapsed)
+    }
+    if (completeEscape(this.state, this.escape.crossedGate && loadedCount(this.state) === this.state.hostages.length)) {
+      this.hud.notify('Hostage safely extracted.', 8)
+    }
+    this.escape.applyCamera(this.camera.perspective)
+    this.audio.setActive(playing && !this.escape.menuVisible)
+    this.audio.setAlarm(false); this.audio.update(this.camera.perspective)
+    this.hud.update(step, this.state, { playing: false, enabled: true, weapon: this.weapons.current, reloading: false,
+      position: this.player.body.position, yaw: 0, deaths: this.deaths, ready: this.ready })
+    this.hud.setEscape(this.escape)
+    return playing && this.escape.running
+  }
+
+  update(dt:number, elapsed = dt) {
     this.finishFrame()
     const landingSpeed = this.player.body.landingSpeed
     this.player.body.landingSpeed = 0
     if (this.escape.active) return this.updateEscape(dt, elapsed)
-    const active = this.isActive()
+    const active=this.isActive()
     if (this.player.immersive || !this.player.enabled || this.state.phase !== 'active') {
       this.playerHits.clear(); this.hud.clearThreat()
       if (this.player.immersive || !this.player.enabled || !this.death.active) {
         this.bulletTrails.clear(); this.ai.bulletTrails.clear()
       }
     }
-    if (this.player.immersive && !this.wasVR) {
+    if(this.player.immersive && !this.wasVR) {
       this.cancelInput()
+      // Entering VR resets transit to a tower landing. Preserve that safe
+      // location, rather than the previous frame's position halfway along a cable.
       this.safePosition.copy(this.player.body.position)
       this.safeQuaternion.copy(this.camera.perspective.quaternion)
     }
-    if (!this.player.immersive && this.wasVR) {
+    if(!this.player.immersive && this.wasVR) {
       this.player.body.teleport(this.safePosition); this.player.actions.syncCamera(this.camera.perspective)
       this.camera.perspective.quaternion.copy(this.safeQuaternion)
     }
-    this.wasVR = this.player.immersive
+    this.wasVR=this.player.immersive
     let deathVisible = this.death.active && this.player.enabled && !this.player.immersive
     const deathPlaying = deathVisible && !this.death.menuVisible && !document.hidden
-    if (active !== this.active) { this.cancelInput(); this.active = active }
+    if(active!==this.active) { this.cancelInput(); this.active=active }
     this.audio.setActive(active || deathPlaying)
-    if (active) {
-      advanceMission(this.state, dt)
-      const body = this.player.body
-      const bounds = this.world.bounds
-      if (body.position.y < -12 || body.position.x < bounds.minX || body.position.x > bounds.maxX || body.position.z < bounds.minZ || body.position.z > bounds.maxZ) {
+    if(active) {
+      advanceMission(this.state,dt)
+      const body=this.player.body
+      const bounds=this.world.bounds
+      if(body.position.y < -12 || body.position.x<bounds.minX || body.position.x>bounds.maxX || body.position.z<bounds.minZ || body.position.z>bounds.maxZ) {
         body.teleport(this.safePosition); this.player.actions.syncCamera(this.camera.perspective)
-        this.hud.notify('The perimeter is closed. Follow the marked routes.', 3)
+        this.hud.notify('The perimeter is closed. Follow the marked routes.',3)
       } else if (!this.player.actions.traversing) this.damage(fallDamage(landingSpeed))
       if (Math.abs(body.position.x - 117) < 10 && body.position.z > -31 && body.position.z < -2) this.state.detentionFound = true
       if (this.state.detentionFound && body.position.y < -2.8) this.state.cellsReached = true
       this.security.update(dt, this.state, this.camera.perspective.position)
-      this.ai.update(dt, { feet: body.position, eye: this.camera.perspective.position, velocity: body.velocity, alive: this.state.phase === 'active', radioEnabled: true,
-        yaw: new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion, 'YXZ').y })
+      this.ai.update(dt,{feet:body.position,eye:this.camera.perspective.position,velocity:body.velocity,alive:this.state.phase==='active',radioEnabled:true,
+        yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y})
       const danger = this.gunfireUntil > this.state.elapsed
       this.escort.update(dt, this.state, body.position, danger)
       if (this.world.rescue) {
@@ -439,40 +525,74 @@ export class MissionRuntime {
         updateRescueJeepDoor(this.world.rescue.jeep, hostage.position, hostage.status === 'loaded', dt)
       }
       this.blood.update(dt)
+      this.impacts.update(dt)
+      const speed=Math.hypot(body.velocity.x,body.velocity.z)
+      if(speed>0.5 && body.grounded || this.player.actions.climbing) {
+        this.stepTime+=dt
+        if(this.stepTime>(this.player.actions.climbing?0.5:speed>5?0.3:0.48)) {
+          this.stepTime=0; this.emit({kind:this.player.actions.climbing?'ladder':'footstep',position:body.position.clone(),radius:speed>5?15:6},true)
+        }
+      } else this.stepTime=0
+      this.safePosition.copy(body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
+      this.interactionTime=Math.max(0,this.interactionTime-dt)
+    } else if (deathPlaying) {
+      // Losing player control does not pause the world. Finish blood flight,
+      // corpse animations and NPC movement until the actual menu opens.
+      this.player.world.refresh()
+      this.ai.update(dt, { feet: this.player.body.position, eye: this.camera.perspective.position,
+        velocity: this.player.body.velocity, alive: false, radioEnabled: false,
+        yaw: new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion, 'YXZ').y })
+      this.escort.update(dt, this.state, this.player.body.position, true)
+      this.blood.update(dt); this.impacts.update(dt)
+      this.security.sync(this.state, this.state.elapsed + this.death.elapsed)
+      if (this.world.rescue) {
+        const hostage = this.state.hostages[0]
+        updateRescueJeepDoor(this.world.rescue.jeep, hostage.position, hostage.status === 'loaded', dt)
+      }
     }
     const reactionActive = this.isActive() && this.state.jeep !== 'escaping'
-    this.interactionTime = Math.max(0, this.interactionTime - dt)
-    if (this.death.active) {
-      this.weapons.updateDeath(this.death.elapsed, this.death.reducedMotion, this.death.hitKick, this.death.hitSide)
-    } else {
-      this.weapons.update(dt, { active: reactionActive && this.interactionTime === 0, climbing: this.player.actions.traversing,
-        moving: this.player.body.velocity.length(), aiming: this.aiming, reducedMotion: this.hud.reducedMotion,
-        feet: this.player.body.position, hitPose: this.playerHits.pose })
+    const aimStrength = this.touch.aimAssistStrength
+    const weapon = this.weapons.current
+    this.aimAssist.update(dt, this.camera.perspective, this.ai.enemies, this.player.world, {
+      enabled: reactionActive && this.player.touchMode && !document.hidden && !this.player.movementLocked &&
+        !this.player.actions.traversing && !this.weapons.reloading && this.interactionTime === 0 &&
+        !!weapon && aimStrength != null,
+      strength: aimStrength ?? 0, range: weapon ? WEAPON_RULES[weapon.name].range : 0, reducedMotion: this.hud.reducedMotion,
+    })
+    const hitPose = this.playerHits.update(reactionActive ? dt : 0,
+      new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y, this.hud.reducedMotion)
+    if (reactionActive) {
+      const zoom = this.aiming && this.weapons.current?.name === 'sniper' && !this.weapons.reloading ? this.weapons.scopeMagnification : 1
+      this.playerHits.applyCamera(this.camera.perspective, this.player.world, 1 / zoom)
     }
-    this.playerHits.update(dt)
-    this.bulletTrails.update(dt)
-    this.ai.bulletTrails.update(dt)
-    this.impacts.update(dt)
+    // A lethal AI hit can start the sequence inside this very update.
+    deathVisible = this.death.active && this.player.enabled && !this.player.immersive
+    if (deathVisible) {
+      if (this.death.update(document.hidden ? 0 : dt, this.camera.perspective, this.player.world)) this.audio.play({ kind: 'player-fall' })
+      this.weapons.updateDeath(this.death.elapsed, this.death.reducedMotion, this.death.hitKick, this.death.hitSide)
+      this.hud.setDeath(this.death)
+    } else {
+      if (this.death.active) { this.death.reset(); this.weapons.resetDeath(); this.hud.clearDeath() }
+      this.weapons.update(dt,{active:reactionActive&&this.interactionTime===0,climbing:this.player.actions.traversing,
+        moving:this.player.body.velocity.length(),aiming:this.aiming,reducedMotion:this.hud.reducedMotion,feet:this.player.body.position,hitPose})
+    }
+    this.audio.update(this.camera.perspective)
     this.audio.setAlarm(this.isActive() && this.state.alarm === 'active',
-      this.camera.perspective.position)
-    this.hud.update(this.state, this.weapons, this.ai, this.playerHits)
+      this.state.alarmPosition ? new THREE.Vector3(...this.state.alarmPosition) : undefined)
+    this.hud.setScoped(this.weapons.scoped, this.weapons.scopeMagnification)
+    if(active || deathPlaying) {
+      this.bulletTrails.update(dt)
+      this.hitFlash-=dt
+    }
+    const crosshair=document.querySelector<HTMLElement>('.crosshair')!
+    crosshair.classList.toggle('confirmed-hit', this.hitFlash > 0)
+    this.hud.update(dt,this.state,{playing:this.player.playing,enabled:this.player.enabled&&!this.player.immersive,
+      weapon:this.weapons.current,reloading:this.weapons.reloading,
+      position:this.player.body.position,yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y,deaths:this.deaths,ready:this.ready})
     this.updateTouch()
-    this.invalidate()
-  }
-
-  private updateEscape(dt: number, elapsed: number) {
-    const playing = this.escape.update(dt, this.camera.perspective)
-    this.escapeDust.update(dt, this.escape)
-    this.hud.setEscape(this.escape)
-    return playing && this.escape.running
+    return active || this.death.running
   }
 
   finishFrame() { this.playerHits.removeCamera() }
-  dispose() {
-    this.escape.reset(this.camera.perspective); this.escapeDust.dispose(); this.playerHits.clear(); this.disposed = true; this.abort.abort()
-    this.touch.dispose(); this.bulletTrails.dispose(); this.escort.dispose(); this.weapons.dispose(); this.ai.dispose()
-    this.blood.dispose(); this.impacts.dispose(); this.audio.dispose(); this.hud.dispose()
-    this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
-    this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}
-  }
+  dispose() { this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.touch.dispose();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
 }
