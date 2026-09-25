@@ -106,6 +106,8 @@ export class TouchControls {
       this.root.addEventListener(event, e => this.release((e as PointerEvent).pointerId, event !== 'pointerup'), opts)
     }
     this.root.addEventListener('contextmenu', e => e.preventDefault(), opts)
+    // Pointer-event cancellation alone does not suppress every Safari touch
+    // default. These surfaces already act on pointers, so need no emulated click.
     const preventBrowserGesture = (event: Event) => { if (player.touchMode && event.cancelable) event.preventDefault() }
     for (const surface of [this.root, document.querySelector('#world')!]) {
       for (const event of ['touchstart', 'touchmove', 'touchend']) {
@@ -158,6 +160,8 @@ export class TouchControls {
 
   private placeMarker(touch: boolean) {
     if (touch) {
+      // Share the actual projected marker instead of drawing a second action.
+      // Inside this layer it can receive a tap above the background look area.
       this.root.append(this.marker)
       this.marker.dataset.touch = 'use'
       this.marker.removeAttribute('aria-hidden')
@@ -174,22 +178,10 @@ export class TouchControls {
     if (!this.active) return
     // Touch/pen often report button 0; some browsers use -1. Only reject non-primary mouse buttons.
     if (event.pointerType === 'mouse' && event.button !== 0) return
-    let element = (event.target as HTMLElement).closest<HTMLElement>('[data-touch]')
+    const element = (event.target as HTMLElement).closest<HTMLElement>('[data-touch]')
     if (!element || element.hidden || element.closest('[inert]') || (element instanceof HTMLButtonElement && element.disabled)) return
     event.preventDefault()
-    let role = element.dataset.touch!
-    // Center of the look pad is the fire control — promote look → fire near the center.
-    // Keep `element` as the original target so setPointerCapture stays reliable on mobile.
-    if (role === 'look' && element === this.lookPad) {
-      const pad = this.lookPad.getBoundingClientRect()
-      const cx = pad.left + pad.width / 2, cy = pad.top + pad.height / 2
-      const dist = Math.hypot(event.clientX - cx, event.clientY - cy)
-      const fireBtn = this.buttons.get('fire')
-      if (fireBtn && !fireBtn.disabled && dist <= pad.width * 0.42) {
-        role = 'fire'
-        fireBtn.classList.add('touch-held')
-      }
-    }
+    const role = element.dataset.touch!
     // A touch outside the picker dismisses it without also turning or firing.
     if (this.pickerOpen && role === 'look') { this.setTray(false); return }
     // One right thumb owns look/fire, preventing competing camera deltas.
@@ -199,14 +191,6 @@ export class TouchControls {
     const contact: Contact = { element, role, x: event.clientX, y: event.clientY,
       radius: (looking ? this.lookPad.getBoundingClientRect().width : rect.width) * 0.37 }
     if (role === 'move') { contact.x = rect.left + rect.width / 2; contact.y = rect.top + rect.height / 2 }
-    // Look-pad / fire use the pad center as a virtual stick. The free-look surface
-    // (right half of the screen) keeps the finger-down origin so drag-to-turn works.
-    if (role === 'fire' || element === this.lookPad) {
-      const pad = this.lookPad.getBoundingClientRect()
-      contact.x = pad.left + pad.width / 2
-      contact.y = pad.top + pad.height / 2
-      contact.radius = pad.width * 0.37
-    }
     this.contacts.set(event.pointerId, contact)
     element.setPointerCapture(event.pointerId)
     element.classList.add('touch-held')
@@ -216,7 +200,6 @@ export class TouchControls {
       this.setTray(false)
       this.lookPad.classList.add('touch-tracking')
       if (role === 'fire') this.callbacks.fire(true)
-      this.move(event)
     } else this.activate(element)
   }
 
@@ -255,7 +238,6 @@ export class TouchControls {
     if (!contact) return
     this.contacts.delete(id)
     contact.element.classList.remove('touch-held')
-    this.buttons.get('fire')?.classList.remove('touch-held')
     if (contact.element.hasPointerCapture(id)) contact.element.releasePointerCapture(id)
     if (contact.role === 'fire') this.callbacks.fire(false, cancelled)
     if (contact.role === 'move') {
@@ -275,6 +257,8 @@ export class TouchControls {
   private setTray(open: boolean) {
     if (this.pickerOpen === open) return
     const restoreFocus = this.actions.contains(document.activeElement)
+    // Preserve the movement thumb, but never carry a trigger/camera contact
+    // across the change of controls. Pointer-up cannot activate a new button.
     for (const [id, contact] of this.contacts) {
       if (contact.role !== 'move' && contact.role !== 'pause') this.release(id, true)
     }
