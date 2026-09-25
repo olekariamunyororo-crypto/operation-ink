@@ -179,14 +179,15 @@ export class TouchControls {
     event.preventDefault()
     let role = element.dataset.touch!
     // Center of the look pad is the fire control — promote look → fire near the center.
+    // Keep `element` as the original target so setPointerCapture stays reliable on mobile.
     if (role === 'look' && element === this.lookPad) {
       const pad = this.lookPad.getBoundingClientRect()
       const cx = pad.left + pad.width / 2, cy = pad.top + pad.height / 2
       const dist = Math.hypot(event.clientX - cx, event.clientY - cy)
       const fireBtn = this.buttons.get('fire')
-      if (fireBtn && !fireBtn.disabled && dist <= pad.width * 0.32) {
-        element = fireBtn
+      if (fireBtn && !fireBtn.disabled && dist <= pad.width * 0.42) {
         role = 'fire'
+        fireBtn.classList.add('touch-held')
       }
     }
     // A touch outside the picker dismisses it without also turning or firing.
@@ -254,6 +255,7 @@ export class TouchControls {
     if (!contact) return
     this.contacts.delete(id)
     contact.element.classList.remove('touch-held')
+    this.buttons.get('fire')?.classList.remove('touch-held')
     if (contact.element.hasPointerCapture(id)) contact.element.releasePointerCapture(id)
     if (contact.role === 'fire') this.callbacks.fire(false, cancelled)
     if (contact.role === 'move') {
