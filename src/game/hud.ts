@@ -14,6 +14,14 @@ const icons: Record<string, string> = {
   zipline: '<path d="M2 3l20 7M8 5l-1 4 5 2 1-4M10 10l-1 6 5 2m-5-2-4 5m9-3 3 3"/>',
   pickup: '<path d="M4 13v7h16v-7M12 2v13m-5-5 5 5 5-5"/>',
   mission: '<path d="M5 20V4h14v16ZM8 8h8M8 12h3m4 0h1M8 16h8"/>',
+  objective: '<path d="M12 2l3.1 7.1H22.5l-5.9 4.9 1.9 7.4L12 17.8 5.5 21.8 7.4 14.4 1.5 9.5h7.4z"/>',
+  hostage: '<path d="M12 3a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM6 21v-1a6 6 0 0 1 12 0v1M9 12h6"/>',
+  reload: '<path d="M20 7a8 8 0 1 0 1.5 5M20 3v5h-5"/>',
+  alert: '<path d="M12 3 2.5 20h19L12 3zM12 10v4M12 17h.01"/>',
+  interact: '<path d="M8 11V8a2 2 0 1 1 4 0v2M12 10V7a2 2 0 1 1 4 0v4M16 11V9a2 2 0 1 1 4 0v7a5 5 0 0 1-5 5h-2a6 6 0 0 1-6-6v-2a2 2 0 1 1 4 0"/>',
+  health: '<path d="M12 21s-7-4.5-7-10a4.5 4.5 0 0 1 8-2.9A4.5 4.5 0 0 1 19 11c0 5.5-7 10-7 10z"/>',
+  escape: '<path d="M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/>',
+  combat: '<path d="M4 20 12 4l8 16M8 14h8"/>',
 }
 
 export class MissionHUD {
