@@ -20,7 +20,7 @@ body::before {
   inset: 0;
   z-index: 9;
   pointer-events: none;
-  background: radial-gradient(ellipse 78% 72% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.055) 100%);
+  background: radial-gradient(ellipse 85% 80% at 50% 46%, transparent 62%, rgba(0, 0, 0, 0.038) 100%);
 }
 body::after {
   content: "";
@@ -29,7 +29,7 @@ body::after {
   z-index: 10;
   pointer-events: none;
   background: url('/textures/paper-grain.svg') repeat;
-  opacity: 0.055;
+  opacity: 0.042;
   mix-blend-mode: multiply;
 }
 body[data-vr="active"]::before,
