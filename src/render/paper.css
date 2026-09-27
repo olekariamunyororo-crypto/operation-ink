@@ -13,7 +13,15 @@
   color: var(--ink-deep);
 }
 
-/* A fixed, faint paper fibre texture. It never moves or obscures input. */
+/* Fixed paper fibre + soft vignette (Summer Cycle grade idea, CSS-only — no post stack). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  background: radial-gradient(ellipse 78% 72% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.055) 100%);
+}
 body::after {
   content: "";
   position: fixed;
@@ -21,9 +29,10 @@ body::after {
   z-index: 10;
   pointer-events: none;
   background: url('/textures/paper-grain.svg') repeat;
-  opacity: 0.035;
+  opacity: 0.055;
   mix-blend-mode: multiply;
 }
+body[data-vr="active"]::before,
 body[data-vr="active"]::after { display: none; }
 ::selection { color: var(--paper); background: var(--ink); }
 input, select { accent-color: var(--ink); }

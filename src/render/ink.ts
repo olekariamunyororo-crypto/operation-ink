@@ -90,6 +90,10 @@ const silhouette = new THREE.ShaderMaterial({
 export function resizeInk(width: number, height: number) {
   strokeMaterial.resolution.set(width, height)
   silhouette.uniforms.resolution.value.set(width, height)
+  // Keep stroke weight stable across resolutions (\~1px reference at 1080p).
+  const scale = Math.max(0.85, Math.min(1.6, height / 1080))
+  strokeMaterial.linewidth = scale
+  silhouette.uniforms.width.value = 1.15 * scale
 }
 
 /** Single-sided ink lettering, placed just outside a wall with no backing board. */

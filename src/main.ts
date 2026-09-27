@@ -50,7 +50,12 @@ const frameTimes: number[] = []
 let startupReady = !mission
 // Initialization positions the mission camera and settles the menu (including
 // load errors). Reveal only after that state has actually been rendered.
-void mission?.initialized.then(() => { startupReady = true; invalidate() })
+void mission?.initialized.then(() => {
+  startupReady = true
+  // Warm GPU programs for the loaded mission.
+  try { renderer.compile(scene, camera.active) } catch { /* best-effort */ }
+  invalidate()
+})
 
 renderer.xr.addEventListener('sessionstart', () => {
   cancelAnimationFrame(frame)
@@ -100,16 +105,40 @@ function render(now: number, xrFrame?: XRFrame) {
 // Slow GPUs: when play stays under ~40 fps, shade fewer pixels (never below 1×). Stroke widths are in CSS px and keep their size.
 // ponytail: one-way and frame-time based. Frame time cannot tell GPU- from CPU-bound, so a step that
 // does not help is undone and adaptation stops; a reload restores full resolution. Add step-up if players ask.
-let resolutionFrames = 0, resolutionTrial = 0, resolutionSettled = false
+let resolutionFrames = 0
+let resolutionSettled = false
+let resolutionCooldown = 0
+let refreshMs = 16.67
+let refreshSamples: number[] = []
 function adaptResolution() {
-  const recent = frameTimes.slice(-90), average = recent.reduce((a, b) => a + b, 0) / recent.length
   resolutionFrames = 0
-  if (resolutionTrial) {
-    if (average > resolutionTrial * 0.9) { resolutionScale /= 0.8; resolutionSettled = true }
-    resolutionTrial = 0
-  } else if (average > 25 && pixelRatio() > 1) { resolutionTrial = average; resolutionScale *= 0.8 }
-  else return
-  resize()
+  if (resolutionSettled || renderer.xr.isPresenting) return
+  const recent = frameTimes.slice(-90)
+  if (recent.length < 45) return
+  if (refreshSamples.length < 120) {
+    refreshSamples.push(...recent.slice(-30))
+    if (refreshSamples.length >= 90) {
+      const sorted = [...refreshSamples].sort((a, b) => a - b)
+      const median = sorted[Math.floor(sorted.length / 2)]
+      const candidates = [1000 / 60, 1000 / 90, 1000 / 120, 1000 / 144]
+      refreshMs = candidates.reduce((best, c) => Math.abs(c - median) < Math.abs(best - median) ? c : best, median)
+    }
+  }
+  if (resolutionCooldown > 0) { resolutionCooldown -= 1; return }
+  const budget = refreshMs * 1.35
+  const over = recent.filter(ms => ms > budget).length / recent.length
+  if (over > 0.22 && pixelRatio() > 1.01) {
+    const before = resolutionScale
+    resolutionScale = Math.max(1 / Math.max(window.devicePixelRatio, 1.25), resolutionScale * 0.82)
+    if (Math.abs(resolutionScale - before) < 0.01) { resolutionSettled = true; return }
+    resolutionCooldown = 6
+    if (pixelRatio() <= 1.05) resolutionSettled = true
+    resize()
+  } else if (over < 0.08 && resolutionScale < 1 && recent.every(ms => ms < refreshMs * 1.05)) {
+    resolutionScale = Math.min(1, resolutionScale / 0.9)
+    resolutionCooldown = 8
+    resize()
+  }
 }
 
 function resize() {
