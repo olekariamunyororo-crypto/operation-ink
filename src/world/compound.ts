@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { Draft, palette, type Point } from '../render/ink'
 import { building, container, crates, platform, truck, workshop, type BuildingSpec } from './architecture'
+import { barrelCluster, cableSpool, jerseyBarrier, pallet, sandbagStack } from './props'
 import { messHall } from './messHall'
 import { drawPine, treeRadius, treeSeed } from './vegetation'
 import { fence, fuelTank, gate, lamp, railway, watchTower, waterTower, towerZipline,
@@ -216,6 +217,27 @@ export function createCompound() {
   const [pipeX, pipeZ] = mapPoint(211, 315)
   props.beam([pipeX, 0.6, pipeZ], [pipeX, 0.6, pipeZ + 37], 0.22, 'paper', 'detail')
   for (let i = 0; i <= 6; i++) props.box(0.55, 0.5, 0.65, pipeX, 0.25, pipeZ + i * 6, 'concrete', 'detail')
+  // Extra yard dressing — barriers, bags, pallets (keeps corridors clear).
+  for (const [px, pz, yaw] of [[690, 590, 0.3], [710, 605, -0.4], [420, 660, 1.2]] as const) {
+    const [x, z] = mapPoint(px, pz)
+    jerseyBarrier(props, x, z, yaw)
+  }
+  for (const [px, pz, n, yaw] of [[660, 575, 6, 0.2], [360, 690, 5, -0.5], [900, 780, 4, 0.8]] as const) {
+    const [x, z] = mapPoint(px, pz)
+    sandbagStack(props, x, z, n, yaw)
+  }
+  for (const [px, pz, yaw] of [[780, 560, 0.15], [1180, 820, -0.6]] as const) {
+    const [x, z] = mapPoint(px, pz)
+    pallet(props, x, z, yaw)
+  }
+  for (const [px, pz, n] of [[600, 740, 3], [1100, 760, 4], [340, 340, 3]] as const) {
+    const [x, z] = mapPoint(px, pz)
+    barrelCluster(props, x, z, n)
+  }
+  for (const [px, pz] of [[530, 580], [1250, 700]] as const) {
+    const [x, z] = mapPoint(px, pz)
+    cableSpool(props, x, z)
+  }
   root.add(props.finish())
   for (const [i, [px, pz]] of [[648, 542], [1154, 589], [1356, 651], [763, 839], [335, 612], [395, 337]].entries()) root.add(lamp(`Yard light ${i + 1}`, ...mapPoint(px, pz)))
   root.add(landscaping())
