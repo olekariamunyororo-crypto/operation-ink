@@ -37,7 +37,17 @@ const HIT_COLOR = { head: { pitch: 1.22, gain: 1.06 }, torso: { pitch: 0.82, gai
 
 export class MissionAudio {
   private context: AudioContext | null = null
+  /** Entry for every voice; routes through EQ → compressor → limiter → master. */
+  private bus: GainNode | null = null
+  private warmEq: BiquadFilterNode | null = null
+  private compressor: DynamicsCompressorNode | null = null
+  private limiter: DynamicsCompressorNode | null = null
   private master: GainNode | null = null
+  private ambientFilter: BiquadFilterNode | null = null
+  private ambientGain: GainNode | null = null
+  private zoneHum: OscillatorNode | null = null
+  private zoneHumGain: GainNode | null = null
+  private audioZone: 'outdoor' | 'cells' = 'outdoor'
   private sources = new Set<AudioScheduledSourceNode>()
   private incidentalSources = new Set<AudioScheduledSourceNode>()
   private whizSources = new Set<AudioScheduledSourceNode>()
@@ -75,7 +85,28 @@ export class MissionAudio {
     try {
       if (!this.context) {
         this.context = new AudioContext()
+        this.bus = this.context.createGain()
+        this.warmEq = this.context.createBiquadFilter()
+        this.warmEq.type = 'highshelf'
+        this.warmEq.frequency.value = 3200
+        this.warmEq.gain.value = -3.5
+        this.compressor = this.context.createDynamicsCompressor()
+        this.compressor.threshold.value = -18
+        this.compressor.knee.value = 12
+        this.compressor.ratio.value = 3.5
+        this.compressor.attack.value = 0.008
+        this.compressor.release.value = 0.18
+        this.limiter = this.context.createDynamicsCompressor()
+        this.limiter.threshold.value = -4
+        this.limiter.knee.value = 0
+        this.limiter.ratio.value = 20
+        this.limiter.attack.value = 0.003
+        this.limiter.release.value = 0.08
         this.master = this.context.createGain()
+        this.bus.connect(this.warmEq)
+        this.warmEq.connect(this.compressor)
+        this.compressor.connect(this.limiter)
+        this.limiter.connect(this.master)
         this.master.connect(this.context.destination)
         this.setVolume(this.volume)
         this.noise = this.context.createBuffer(1, this.context.sampleRate * 2, this.context.sampleRate)
@@ -141,19 +172,58 @@ export class MissionAudio {
       listener.upX.value = u.x; listener.upY.value = u.y; listener.upZ.value = u.z
     } else { listener.setPosition(p.x, p.y, p.z); listener.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z) }
     if (this.active && !this.ambience) this.startAmbience()
+    this.applyZone(p.y)
+  }
+
+  /** Outdoor yard vs underground cells — smooth ambient colour without hard cuts. */
+  private applyZone(y: number) {
+    if (!this.context) return
+    const zone: 'outdoor' | 'cells' = y < -2 ? 'cells' : 'outdoor'
+    this.audioZone = zone
+    const t = this.context.currentTime
+    const freq = zone === 'cells' ? 170 : 400
+    const bed = zone === 'cells' ? 0.05 : 0.03
+    const hum = zone === 'cells' ? 0.014 : 0.0025
+    if (this.ambientFilter) this.ambientFilter.frequency.setTargetAtTime(freq, t, 0.45)
+    if (this.ambientGain) this.ambientGain.gain.setTargetAtTime(bed, t, 0.55)
+    if (this.zoneHumGain) this.zoneHumGain.gain.setTargetAtTime(hum, t, 0.6)
   }
 
   private startAmbience() {
-    if (!this.active || this.dying || this.disposed || !this.context || !this.noise || !this.master || this.ambience) return
-    const source = this.context.createBufferSource(), filter = this.context.createBiquadFilter(), gain = this.context.createGain()
-    source.buffer = this.noise; source.loop = true; filter.type = 'lowpass'; filter.frequency.value = 320
-    gain.gain.value = 0.035
-    source.connect(filter).connect(gain).connect(this.master)
-    this.track(source, [filter, gain]); source.start(); this.ambience = source
+    if (!this.active || this.dying || this.disposed || !this.context || !this.noise || !this.bus || this.ambience) return
+    const source = this.context.createBufferSource()
+    const filter = this.context.createBiquadFilter()
+    const gain = this.context.createGain()
+    source.buffer = this.noise
+    source.loop = true
+    filter.type = 'lowpass'
+    filter.frequency.value = this.audioZone === 'cells' ? 180 : 380
+    gain.gain.value = this.audioZone === 'cells' ? 0.048 : 0.032
+    source.connect(filter).connect(gain).connect(this.bus)
+    this.track(source, [filter, gain])
+    source.start()
+    this.ambience = source
+    this.ambientFilter = filter
+    this.ambientGain = gain
+    if (!this.zoneHum) {
+      const hum = this.context.createOscillator()
+      const humGain = this.context.createGain()
+      const humFilter = this.context.createBiquadFilter()
+      hum.type = 'sine'
+      hum.frequency.value = 58
+      humFilter.type = 'lowpass'
+      humFilter.frequency.value = 120
+      humGain.gain.value = this.audioZone === 'cells' ? 0.012 : 0.003
+      hum.connect(humFilter).connect(humGain).connect(this.bus)
+      this.track(hum, [humFilter, humGain])
+      hum.start()
+      this.zoneHum = hum
+      this.zoneHumGain = humGain
+    }
     if (this.musicBuffer) {
       const music = this.context.createBufferSource(), musicGain = this.context.createGain()
-      music.buffer = this.musicBuffer; music.loop = true; musicGain.gain.value = 0.028
-      music.connect(musicGain).connect(this.master)
+      music.buffer = this.musicBuffer; music.loop = true; musicGain.gain.value = 0.024
+      music.connect(musicGain).connect(this.bus)
       this.track(music, [musicGain]); music.start(); this.music = music; this.musicGain = musicGain
     }
   }
@@ -218,8 +288,8 @@ export class MissionAudio {
       panner.refDistance = event.kind === 'horn' ? 24 : enemyReport ? event.kind === 'enemy-shot-sniper' ? 16 : 10 : vocal ? 10 : 4
       panner.maxDistance = event.radius ?? 60; panner.rolloffFactor = event.kind === 'horn' ? 0.65 : vocal || enemyReport ? 0.85 : 1.35
       panner.positionX.value = event.position!.x; panner.positionY.value = event.position!.y; panner.positionZ.value = event.position!.z
-      gain.connect(panner).connect(this.master!)
-    } else gain.connect(this.master!)
+      gain.connect(panner).connect(this.bus!)
+    } else gain.connect(this.bus!)
     return { gain, panner }
   }
 
@@ -424,7 +494,7 @@ export class MissionAudio {
   /** Non-positional UI feedback uses the same mute/volume bus, never AI hearing. */
   controlTick(strong = false) {
     const context = this.context
-    if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.dying || this.disposed || !this.reserveSources(1)) return
+    if (!context || !this.bus || !this.active || this.muted || this.volume <= 0 || this.dying || this.disposed || !this.reserveSources(1)) return
     const oscillator = context.createOscillator(), gain = context.createGain(), now = context.currentTime
     oscillator.type = 'sine'
     oscillator.frequency.setValueAtTime(strong ? 340 : 520, now)
@@ -432,13 +502,13 @@ export class MissionAudio {
     gain.gain.setValueAtTime(0.001, now)
     gain.gain.exponentialRampToValueAtTime(0.065, now + 0.003)
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045)
-    oscillator.connect(gain).connect(this.master)
+    oscillator.connect(gain).connect(this.bus)
     this.track(oscillator, [gain]); oscillator.start(now); oscillator.stop(now + 0.05)
   }
 
   play(event: SoundEvent) {
     const context = this.context
-    if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed) return
+    if (!context || !this.bus || !this.active || this.muted || this.volume <= 0 || this.disposed) return
     if (this.dying && !['player-death', 'player-fall'].includes(event.kind)) return
     if (event.kind === 'player-death') {
       if (this.reserveSources(3, true)) this.deathSound()
@@ -532,7 +602,9 @@ export class MissionAudio {
 
   clear() {
     for (const source of [...this.sources]) { try { source.stop() } catch { /* already ended */ }; this.cleanup.get(source)?.() }
-    this.ambience = null; this.music = null; this.musicGain = null; this.alarmSource = null; this.voiceUntil = 0; this.whizUntil = 0; this.bulletHitUntil = 0
+    this.ambience = null; this.music = null; this.musicGain = null; this.alarmSource = null
+    this.ambientFilter = null; this.ambientGain = null; this.zoneHum = null; this.zoneHumGain = null
+    this.voiceUntil = 0; this.whizUntil = 0; this.bulletHitUntil = 0
     this.incidentalSources.clear(); this.whizSources.clear()
     this.speakerUntil.clear(); this.phraseUntil.clear(); this.painUntil.clear(); this.painSources.clear(); this.spoken = null
   }
@@ -543,6 +615,9 @@ export class MissionAudio {
   dispose() {
     this.disposed = true; this.active = false; this.loadAbort.abort(); this.reset()
     this.buffers.clear(); this.noise = null; this.crackNoise = null; this.musicBuffer = null
-    this.master?.disconnect(); this.master = null; void this.context?.close().catch(() => {}); this.context = null
+    this.bus?.disconnect(); this.warmEq?.disconnect(); this.compressor?.disconnect()
+    this.limiter?.disconnect(); this.master?.disconnect()
+    this.bus = null; this.warmEq = null; this.compressor = null; this.limiter = null; this.master = null
+    void this.context?.close().catch(() => {}); this.context = null
   }
 }
