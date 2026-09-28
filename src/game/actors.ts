@@ -103,6 +103,7 @@ export class EnemyActor {
     this.material.customProgramCacheKey = original.customProgramCacheKey.bind(original)
     this.material.color.setHex(penPalette.character)
     this.material.toneMapped = false
+    this.material.fog = false
     this.material.depthTest = this.material.depthWrite = true
     rig.mesh.material = this.material
     this.root.traverse(object => {

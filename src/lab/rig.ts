@@ -57,7 +57,7 @@ export type Rig = {
 /** Rest pose of the loaded rig. Set by loadStickman(); clip.ts reads it, so build clips after the rig loads. */
 export let rest: Rig['rest'] | undefined
 
-const fill = new THREE.MeshBasicMaterial({ color: penPalette.character, toneMapped: false })
+const fill = new THREE.MeshBasicMaterial({ color: penPalette.character, toneMapped: false, fog: false })
 
 // Dual-quaternion skinning (Blender "Preserve Volume"): glTF only carries weights and Three.js skins with linear blending,
 // which collapses the elbow/shoulder at 90 deg and candy-wraps the upper arm on twist. Rewrites the three skinning chunks.

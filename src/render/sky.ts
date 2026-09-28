@@ -59,6 +59,6 @@ export function createPaperSky(radius = 480) {
 }
 
 /** Optional distance haze so far fence lines soften into the page. */
-export function applyPaperFog(scene: THREE.Scene, near = 90, far = 260) {
+export function applyPaperFog(scene: THREE.Scene, near = 140, far = 380) {
   scene.fog = new THREE.Fog(palette.paper, near, far)
 }
