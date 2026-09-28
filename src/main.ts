@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { EnvironmentCamera, views, type ViewName } from './camera'
 import { palette, resizeInk } from './render/ink'
+import { applyPaperFog, createPaperSky } from './render/sky'
 import { createCompound } from './world/compound'
 import { EnvironmentInteractions } from './interactions'
 import { FirstPersonController } from './player/controller'
@@ -23,7 +24,10 @@ renderer.shadowMap.enabled = false
 
 const scene = new THREE.Scene()
 scene.name = 'Black ballpoint compound'
-scene.background = new THREE.Color(palette.paper)
+// Paper gradient dome instead of a flat void; clear color still matches the horizon.
+scene.background = null
+scene.add(createPaperSky())
+applyPaperFog(scene)
 const compound = createCompound()
 const missionWorld = new URLSearchParams(location.search).get('explore') === '1' ? null : createMissionWorld(compound)
 if (missionWorld) prepareCompound(compound)
