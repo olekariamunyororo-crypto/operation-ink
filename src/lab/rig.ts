@@ -121,7 +121,7 @@ fill.onBeforeCompile = (shader) => { shader.vertexShader = dualQuaternionSkinnin
 
 // Inverted-hull outline: back faces pushed out by `width` px along the skinned normal (same idea as ink.ts, plus skinning).
 const outline = new THREE.ShaderMaterial({
-  uniforms: { ink: { value: new THREE.Color(penPalette.character) }, resolution: { value: new THREE.Vector2(1, 1) }, width: { value: 1.2 }, ...dqUniforms },
+  uniforms: { ink: { value: new THREE.Color(penPalette.character) }, resolution: { value: new THREE.Vector2(1, 1) }, width: { value: 1.65 }, ...dqUniforms },
   vertexShader: dualQuaternionSkinning(`
     #include <common>
     #include <skinning_pars_vertex>

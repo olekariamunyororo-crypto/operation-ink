@@ -108,7 +108,11 @@ export class EnemyActor {
     rig.mesh.material = this.material
     this.root.traverse(object => {
       if (object instanceof THREE.SkinnedMesh && object !== rig.mesh) {
-        // The opaque black body already supplies a clean silhouette.
+        // Keep the skinned ink outline (same skeleton) for readable silhouette at range.
+        if (object.name === 'Stickman outline') {
+          object.visible = true
+          return
+        }
         object.visible = false
       }
     })
